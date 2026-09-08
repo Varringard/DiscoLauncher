@@ -38,12 +38,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
@@ -53,18 +47,16 @@
       "allowElevation": false,
       "allowToChangeInstallationDirectory": false,
       "deleteAppDataOnUninstall": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
       "shortcutName": "DiscoLauncher",
-      "artifactName": "DiscoLauncher-Setup.exe",
+      "artifactName": "DiscoLauncher.exe",
       "include": "build/installer.nsh"
-    },
-    "portable": {
-      "artifactName": "DiscoLauncher-Portable.exe"
     }
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "jimp": "^1.6.1",
     "lucide-react": "^1.16.0",
     "minecraft-launcher-core": "^3.18.2",
     "react": "^18.3.1",
