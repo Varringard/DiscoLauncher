@@ -159,25 +159,11 @@ process.on('unhandledRejection', (reason) => {
   writeLogToFile(`[UNHANDLED REJECTION] ${reason}`);
 });
 
-// Helper to read/write JSON config with automatic migration from legacy paths
+// Helper to read/write JSON config
 function readConfig(): Record<string, any> {
   try {
     if (fs.existsSync(configFilePath)) {
       return JSON.parse(fs.readFileSync(configFilePath, 'utf-8'));
-    }
-    // Migration: .DiscoLauncher/discolauncher-config.json
-    const legacyPath1 = path.join(discoRoot, 'discolauncher-config.json');
-    if (fs.existsSync(legacyPath1)) {
-      const data = JSON.parse(fs.readFileSync(legacyPath1, 'utf-8'));
-      fs.writeFileSync(configFilePath, JSON.stringify(data, null, 2), 'utf-8');
-      return data;
-    }
-    // Migration: AppData/Roaming/discolauncher/discolauncher-config.json
-    const legacyPath2 = path.join(appDataRoot, 'discolauncher', 'discolauncher-config.json');
-    if (fs.existsSync(legacyPath2)) {
-      const data = JSON.parse(fs.readFileSync(legacyPath2, 'utf-8'));
-      fs.writeFileSync(configFilePath, JSON.stringify(data, null, 2), 'utf-8');
-      return data;
     }
   } catch (e) {
     console.error('Failed to read config:', e);

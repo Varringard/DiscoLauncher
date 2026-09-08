@@ -65,10 +65,7 @@ export const App: React.FC = () => {
         if (finalDir.includes('.minecraft-launcher') || finalDir.endsWith('\\.minecraft') || finalDir.endsWith('/.minecraft')) {
           finalDir = defaultDir || '';
         }
-        let serverUrl = storedSettings?.serverApiUrl || 'http://192.168.10.123:6500';
-        if (serverUrl.includes(':3000')) {
-          serverUrl = serverUrl.replace(':3000', ':6500');
-        }
+        let serverUrl = storedSettings?.serverApiUrl || '';
         const merged = {
           ...(storedSettings || {}),
           gameDir: finalDir,
