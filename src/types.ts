@@ -64,6 +64,9 @@ export interface LauncherSettings {
   serverApiUrl: string;
   autoCloseOnLaunch: boolean;
   showConsoleOnLaunch?: boolean;
+  showSnapshots?: boolean;
+  showHistorical?: boolean;
+  showModded?: boolean;
 }
 
 export interface LaunchProgress {
@@ -73,11 +76,14 @@ export interface LaunchProgress {
   currentFile?: string;
 }
 
+export type VersionCategory = 'release' | 'snapshot' | 'old_beta' | 'old_alpha' | 'neoforge' | 'fabric' | 'forge' | 'quilt';
+
 export interface MinecraftVersionItem {
   id: string;
   name: string;
-  type: 'release' | 'snapshot' | 'neoforge' | 'fabric' | 'forge' | 'quilt';
+  type: VersionCategory;
   mcVersion: string;
   loaderVersion?: string;
+  releaseTime?: string;
 }
 

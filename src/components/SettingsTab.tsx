@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Cpu, HardDrive, Monitor, FolderOpen, RefreshCw, CheckCircle2, AlertCircle, Terminal } from 'lucide-react';
+import { Settings, Cpu, HardDrive, Monitor, FolderOpen, RefreshCw, CheckCircle2, AlertCircle, Terminal, Layers } from 'lucide-react';
 import { LauncherSettings } from '../types';
 
 interface SettingsTabProps {
@@ -177,6 +177,61 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onUpdateSett
           <p className="text-[11px] text-slate-500 mt-2">
             Обратите внимание: адрес веб-админки (<code className="text-slate-400">http://192.168.10.123:5000</code>), а в лаунчере указывается адрес API лаунчера (<code className="text-indigo-400">http://192.168.10.123:6500</code>).
           </p>
+        </div>
+
+        {/* Minecraft Versions Display Settings */}
+        <div className="bg-[#111724]/70 border border-indigo-950/40 rounded-2xl p-5 backdrop-blur-sm md:col-span-2">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-cyan-400" />
+              Отображение версий Minecraft
+            </h3>
+            <span className="text-xs text-indigo-400 font-mono">Mojang Official Manifest</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-4">
+            Выберите, какие категории версий отображать в списке выбора (поддерживаются все 900+ версий от 2009 года до сегодняшнего дня)
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 cursor-pointer transition-colors select-none">
+              <input
+                type="checkbox"
+                checked={settings.showSnapshots ?? true}
+                onChange={(e) => onUpdateSettings({ ...settings, showSnapshots: e.target.checked })}
+                className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+              />
+              <div className="text-xs">
+                <span className="font-semibold text-slate-200 block">Снапшоты (Snapshots)</span>
+                <span className="text-slate-400 text-[11px]">Тестовые сборки и RC/Pre-релизы</span>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 cursor-pointer transition-colors select-none">
+              <input
+                type="checkbox"
+                checked={settings.showHistorical ?? true}
+                onChange={(e) => onUpdateSettings({ ...settings, showHistorical: e.target.checked })}
+                className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+              />
+              <div className="text-xs">
+                <span className="font-semibold text-slate-200 block">Старые Alpha и Beta</span>
+                <span className="text-slate-400 text-[11px]">Исторические версии 2009-2011 гг.</span>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 cursor-pointer transition-colors select-none">
+              <input
+                type="checkbox"
+                checked={settings.showModded ?? true}
+                onChange={(e) => onUpdateSettings({ ...settings, showModded: e.target.checked })}
+                className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+              />
+              <div className="text-xs">
+                <span className="font-semibold text-slate-200 block">Загрузчики модов</span>
+                <span className="text-slate-400 text-[11px]">Fabric, Forge, NeoForge, Quilt</span>
+              </div>
+            </label>
+          </div>
         </div>
 
         {/* Console & Logs Configuration */}

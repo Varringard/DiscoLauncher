@@ -31,7 +31,10 @@ export const App: React.FC = () => {
     gameDir: '',
     serverApiUrl: '',
     autoCloseOnLaunch: false,
-    showConsoleOnLaunch: false
+    showConsoleOnLaunch: false,
+    showSnapshots: true,
+    showHistorical: true,
+    showModded: true
   });
 
   // Accounts State
@@ -379,6 +382,7 @@ export const App: React.FC = () => {
           selectedVersion={selectedVersion}
           onSelectVersion={(ver) => setSelectedVersion(ver)}
           activeAccount={activeAccount}
+          settings={settings}
           ramMb={settings.allocatedRamMb}
           onSetRamMb={(ram) => setSettings({ ...settings, allocatedRamMb: ram })}
           onLaunch={handleLaunch}

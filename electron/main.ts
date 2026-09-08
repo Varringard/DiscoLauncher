@@ -1377,7 +1377,10 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
     root: gameDir,
     version: {
       number: versionNumber,
-      type: 'release',
+      type: selectedVersion?.type === 'snapshot' ? 'snapshot'
+          : selectedVersion?.type === 'old_beta' ? 'old_beta'
+          : selectedVersion?.type === 'old_alpha' ? 'old_alpha'
+          : 'release',
       custom: customVersionName
     },
     overrides: {
