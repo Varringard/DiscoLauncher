@@ -1,6 +1,6 @@
 {
   "name": "discolauncher",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "DiscoLauncher — open source Minecraft launcher with multi-server management, 3D skin preview, and mod auto-sync",
   "main": "dist-electron/main.js",
   "author": "DiscoLauncher Contributors",
@@ -34,24 +34,15 @@
       "icon": "build/icon.ico",
       "target": [
         {
-          "target": "nsis",
+          "target": "portable",
           "arch": [
             "x64"
           ]
         }
       ]
     },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowElevation": false,
-      "allowToChangeInstallationDirectory": false,
-      "deleteAppDataOnUninstall": false,
-      "createDesktopShortcut": false,
-      "createStartMenuShortcut": false,
-      "shortcutName": "DiscoLauncher",
-      "artifactName": "DiscoLauncher.exe",
-      "include": "build/installer.nsh"
+    "portable": {
+      "artifactName": "DiscoLauncher.exe"
     }
   },
   "dependencies": {

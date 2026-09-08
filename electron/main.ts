@@ -32,17 +32,14 @@ async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string
           if (!latestVersion) return resolve({ hasUpdate: false });
           const hasUpdate = latestVersion !== CURRENT_VERSION && isNewerVersion(latestVersion, CURRENT_VERSION);
 
-          // Check for lightweight app.asar asset first, then exe
-          const asarAsset = (release.assets || []).find((a: any) => a.name === 'app.asar');
+          // Find exe asset for release
           const exeAsset = (release.assets || []).find((a: any) => a.name.endsWith('.exe'));
-          const targetAsset = asarAsset || exeAsset;
 
           resolve({
             hasUpdate,
             version: latestVersion,
-            downloadUrl: targetAsset?.browser_download_url,
-            releaseUrl: release.html_url,
-            isAsar: !!asarAsset
+            downloadUrl: exeAsset?.browser_download_url,
+            releaseUrl: release.html_url
           });
         } catch (e) {
           resolve({ hasUpdate: false });
@@ -220,18 +217,16 @@ async function runSilentAutoUpdate() {
     const update = await checkForUpdates();
     if (!update.hasUpdate || !update.downloadUrl) return;
 
+    writeLogToFile(`[AutoUpdate] Found update v${update.version} from ${update.downloadUrl}`);
+
     mainWindow?.webContents.send('update:status', {
       stage: 'downloading',
       percent: 0,
       version: update.version
     });
 
-    // Check if updating app.asar or full exe
-    const isAsar = !!update.isAsar;
-    const targetFile = isAsar
-      ? path.join(process.resourcesPath, 'app.asar')
-      : (process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
-    const tmpFile = path.join(os.tmpdir(), isAsar ? `update_${update.version}.asar` : `DiscoLauncher_v${update.version}.exe`);
+    const targetFile = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+    const tmpFile = path.join(os.tmpdir(), `DiscoLauncher_v${update.version}.exe`);
 
     await downloadUpdate(update.downloadUrl, tmpFile, (pct) => {
       mainWindow?.webContents.send('update:status', {
@@ -241,31 +236,55 @@ async function runSilentAutoUpdate() {
       });
     });
 
+    writeLogToFile(`[AutoUpdate] Download complete. Preparing replacement of: ${targetFile}`);
+
     mainWindow?.webContents.send('update:status', {
       stage: 'installing',
       percent: 100,
       version: update.version
     });
 
-    const exeToRestart = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-    // Completely hidden background update process (no visible CMD window, no pings)
-    const psScript = [
-      'Start-Sleep -Milliseconds 1500;',
-      'for ($i = 0; $i -lt 30; $i++) {',
-      `  try { Copy-Item -LiteralPath '${tmpFile.replace(/'/g, "''")}' -Destination '${targetFile.replace(/'/g, "''")}' -Force -ErrorAction Stop; break; }`,
-      '  catch { Start-Sleep -Milliseconds 300; }',
-      '};',
-      `Remove-Item -LiteralPath '${tmpFile.replace(/'/g, "''")}' -Force -ErrorAction SilentlyContinue;`,
-      `Start-Process -FilePath '${exeToRestart.replace(/'/g, "''")}';`
-    ].join(' ');
+    const oldPid = process.pid;
+    // Bulletproof hidden updater using PowerShell Base64 EncodedCommand
+    const psScript = `
+param()
+$oldPid = ${oldPid}
+if ($oldPid -gt 0) {
+  try {
+    $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+    if ($proc) { $proc.WaitForExit(15000) }
+  } catch {}
+}
 
-    spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-NoProfile', '-Command', psScript], {
+Start-Sleep -Milliseconds 1000
+
+$target = "${targetFile.replace(/\\/g, '\\\\')}"
+$source = "${tmpFile.replace(/\\/g, '\\\\')}"
+
+for ($i = 0; $i -lt 50; $i++) {
+  try {
+    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+    break
+  } catch {
+    Start-Sleep -Milliseconds 300
+  }
+}
+
+Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+
+Start-Process -FilePath $target
+`;
+
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-NoProfile', '-EncodedCommand', encoded], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
     }).unref();
+
     app.quit();
   } catch (err: any) {
+    writeLogToFile(`[AutoUpdate ERROR] ${err?.message || err}`);
     console.warn('Auto-update notice:', err?.message);
     mainWindow?.webContents.send('update:status', {
       stage: 'error',
