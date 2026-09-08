@@ -36,8 +36,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Auto-updater
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
-  downloadAndInstallUpdate: (url: string) => ipcRenderer.invoke('update:download-and-install', url),
-  openReleasePage: (url: string) => ipcRenderer.invoke('update:open-release-page', url),
+  triggerUpdate: () => ipcRenderer.invoke('update:trigger'),
 
   // Events listener for download progress / logs
   onLaunchProgress: (callback: (data: any) => void) => {
@@ -50,14 +49,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('game:log', handler);
     return () => ipcRenderer.removeListener('game:log', handler);
   },
-  onUpdateAvailable: (callback: (info: { version: string; releaseUrl: string; downloadUrl: string }) => void) => {
-    const handler = (_: any, info: any) => callback(info);
-    ipcRenderer.on('update:available', handler);
-    return () => ipcRenderer.removeListener('update:available', handler);
-  },
-  onUpdateProgress: (callback: (pct: number) => void) => {
-    const handler = (_: any, pct: number) => callback(pct);
-    ipcRenderer.on('update:progress', handler);
-    return () => ipcRenderer.removeListener('update:progress', handler);
+  onUpdateStatus: (callback: (status: { stage: 'downloading' | 'installing' | 'error'; percent: number; version: string; error?: string }) => void) => {
+    const handler = (_: any, data: any) => callback(data);
+    ipcRenderer.on('update:status', handler);
+    return () => ipcRenderer.removeListener('update:status', handler);
   }
 });

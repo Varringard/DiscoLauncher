@@ -146,6 +146,59 @@ function createWindow() {
   });
 }
 
+async function runSilentAutoUpdate() {
+  if (!app.isPackaged) return; // Don't replace electron.exe during local development
+  try {
+    const update = await checkForUpdates();
+    if (!update.hasUpdate || !update.downloadUrl) return;
+
+    mainWindow?.webContents.send('update:status', {
+      stage: 'downloading',
+      percent: 0,
+      version: update.version
+    });
+
+    const exePath = process.execPath;
+    const tmpExe = exePath + '.update.exe';
+
+    await downloadUpdate(update.downloadUrl, tmpExe, (pct) => {
+      mainWindow?.webContents.send('update:status', {
+        stage: 'downloading',
+        percent: pct,
+        version: update.version
+      });
+    });
+
+    mainWindow?.webContents.send('update:status', {
+      stage: 'installing',
+      percent: 100,
+      version: update.version
+    });
+
+    // Write a small .bat that waits for launcher to close, replaces the exe and restarts
+    const batPath = path.join(os.tmpdir(), 'discolauncher_update.bat');
+    const batContent = [
+      '@echo off',
+      'ping 127.0.0.1 -n 2 > nul',
+      `copy /Y "${tmpExe}" "${exePath}"`,
+      `del "${tmpExe}"`,
+      `start "" "${exePath}"`,
+      'del "%~f0"'
+    ].join('\r\n');
+    fs.writeFileSync(batPath, batContent, 'ascii');
+    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }).unref();
+    app.quit();
+  } catch (err: any) {
+    console.warn('Auto-update notice:', err?.message);
+    mainWindow?.webContents.send('update:status', {
+      stage: 'error',
+      percent: 0,
+      version: '',
+      error: err?.message
+    });
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -153,19 +206,15 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 
-  // Check for updates 8 seconds after launch (non-blocking)
-  setTimeout(async () => {
-    try {
-      const update = await checkForUpdates();
-      if (update.hasUpdate && mainWindow) {
-        mainWindow.webContents.send('update:available', {
-          version: update.version,
-          releaseUrl: update.releaseUrl,
-          downloadUrl: update.downloadUrl
-        });
-      }
-    } catch (e) {}
-  }, 8000);
+  // Check and apply updates automatically 2.5 seconds after launch
+  setTimeout(() => {
+    runSilentAutoUpdate();
+  }, 2500);
+
+  // Re-check every 30 minutes
+  setInterval(() => {
+    runSilentAutoUpdate();
+  }, 30 * 60 * 1000);
 });
 
 app.on('window-all-closed', () => {
@@ -181,35 +230,9 @@ ipcMain.handle('update:check', async () => {
   return await checkForUpdates();
 });
 
-ipcMain.handle('update:download-and-install', async (_event, downloadUrl: string) => {
-  if (!downloadUrl) return { success: false, error: 'No download URL' };
-  const exePath = process.execPath; // path to current .exe
-  const tmpExe = exePath + '.update.exe';
-  try {
-    await downloadUpdate(downloadUrl, tmpExe, (pct) => {
-      mainWindow?.webContents.send('update:progress', pct);
-    });
-    // Write a small .bat that replaces the exe and restarts
-    const batPath = path.join(os.tmpdir(), 'discolauncher_update.bat');
-    const batContent = [
-      '@echo off',
-      'ping 127.0.0.1 -n 3 > nul',
-      `copy /Y "${tmpExe}" "${exePath}"`,
-      `del "${tmpExe}"`,
-      `start "" "${exePath}"`,
-      'del "%~f0"'
-    ].join('\r\n');
-    fs.writeFileSync(batPath, batContent, 'ascii');
-    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }).unref();
-    app.quit();
-    return { success: true };
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('update:open-release-page', (_event, url: string) => {
-  shell.openExternal(url);
+ipcMain.handle('update:trigger', async () => {
+  runSilentAutoUpdate();
+  return { success: true };
 });
 
 // Window controls IPC

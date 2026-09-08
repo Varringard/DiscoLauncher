@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Header } from './components/Header';
 import { Navigation, TabType } from './components/Navigation';
 import { ServerList } from './components/ServerList';
@@ -12,10 +13,13 @@ export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>('servers');
   const [isAccountsOpen, setIsAccountsOpen] = useState(false);
 
-  // Update notification state
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; releaseUrl: string; downloadUrl: string } | null>(null);
-  const [updateState, setUpdateState] = useState<'idle' | 'downloading' | 'done'>('idle');
-  const [updateProgress, setUpdateProgress] = useState(0);
+  // Auto-updating State (seamless without prompts)
+  const [updatingState, setUpdatingState] = useState<{
+    stage: 'downloading' | 'installing' | 'error';
+    percent: number;
+    version: string;
+    error?: string;
+  } | null>(null);
 
   // Settings State
   const [settings, setSettings] = useState<LauncherSettings>({
@@ -119,19 +123,15 @@ export const App: React.FC = () => {
       setLogs((prev) => [...prev, line]);
     });
 
-    // Auto-updater events
-    const unsubUpdate = api.onUpdateAvailable?.((info: any) => {
-      setUpdateInfo(info);
-    });
-    const unsubUpdateProgress = api.onUpdateProgress?.((pct: number) => {
-      setUpdateProgress(pct);
+    // Auto-updater status (seamless silent update)
+    const unsubUpdateStatus = api.onUpdateStatus?.((data: any) => {
+      setUpdatingState(data);
     });
 
     return () => {
       unsubProgress?.();
       unsubLogs?.();
-      unsubUpdate?.();
-      unsubUpdateProgress?.();
+      unsubUpdateStatus?.();
     };
   }, []);
 
@@ -307,40 +307,34 @@ export const App: React.FC = () => {
         onOpenAccounts={() => setIsAccountsOpen(true)}
       />
 
-      {/* Update notification banner */}
-      {updateInfo && updateState !== 'done' && (
-        <div className="flex items-center justify-between gap-3 px-5 py-2 bg-indigo-600/90 border-b border-indigo-500/60 text-sm text-white backdrop-blur-sm z-40">
-          <span className="font-medium">
-            🚀 Доступна новая версия <b>v{updateInfo.version}</b>!
-          </span>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {updateState === 'downloading' ? (
-              <span className="text-indigo-200 text-xs">Загрузка... {updateProgress}%</span>
-            ) : (
-              <>
-                <button
-                  onClick={() => {
-                    setUpdateState('downloading');
-                    (window as any).electronAPI?.downloadAndInstallUpdate(updateInfo.downloadUrl);
-                  }}
-                  className="px-3 py-1 rounded-lg bg-white text-indigo-700 font-semibold text-xs hover:bg-indigo-50 transition-colors"
-                >
-                  Обновить и перезапустить
-                </button>
-                <button
-                  onClick={() => (window as any).electronAPI?.openReleasePage(updateInfo.releaseUrl)}
-                  className="px-3 py-1 rounded-lg bg-indigo-700/60 text-white text-xs hover:bg-indigo-700 transition-colors"
-                >
-                  Подробнее
-                </button>
-                <button
-                  onClick={() => setUpdateInfo(null)}
-                  className="text-indigo-200 hover:text-white text-xs px-1"
-                >
-                  ✕
-                </button>
-              </>
-            )}
+      {/* Auto-update Progress Overlay (Seamless, zero clicks required) */}
+      {updatingState && updatingState.stage !== 'error' && (
+        <div className="fixed inset-0 z-[100] bg-[#070a10]/95 backdrop-blur-md flex flex-col items-center justify-center p-6 select-none animate-in fade-in duration-300">
+          <div className="p-8 rounded-3xl bg-[#0e1320] border border-indigo-500/30 shadow-2xl max-w-sm w-full flex flex-col items-center text-center">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center mb-5 text-cyan-400">
+              <Sparkles className="w-7 h-7 animate-pulse" />
+            </div>
+            <h3 className="text-lg font-black text-white tracking-tight mb-1">
+              Обновление DiscoLauncher
+            </h3>
+            <p className="text-xs text-slate-400 mb-6">
+              {updatingState.stage === 'downloading'
+                ? `Загрузка новой версии v${updatingState.version}...`
+                : 'Установка и перезапуск лаунчера...'}
+            </p>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden p-0.5 border border-slate-700/60 mb-3">
+              <div
+                className="bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 h-full rounded-full transition-all duration-300"
+                style={{ width: `${updatingState.percent}%` }}
+              />
+            </div>
+
+            <div className="flex justify-between w-full text-[11px] font-mono text-slate-400">
+              <span className="text-indigo-300">v1.0.0 → v{updatingState.version}</span>
+              <span className="text-cyan-400 font-bold">{updatingState.percent}%</span>
+            </div>
           </div>
         </div>
       )}
