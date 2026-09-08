@@ -34,6 +34,12 @@
       "icon": "build/icon.ico",
       "target": [
         {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "portable",
           "arch": [
             "x64"
@@ -41,8 +47,20 @@
         }
       ]
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DiscoLauncher",
+      "artifactName": "DiscoLauncher-Setup.exe",
+      "include": "build/installer.nsh"
+    },
     "portable": {
-      "artifactName": "DiscoLauncher.exe"
+      "artifactName": "DiscoLauncher-Portable.exe"
     }
   },
   "dependencies": {

@@ -15,7 +15,7 @@ const GITHUB_OWNER = 'Varringard';
 const GITHUB_REPO = 'DiscoLauncher';
 const CURRENT_VERSION = app.getVersion();
 
-async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; downloadUrl?: string; releaseUrl?: string }> {
+async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; downloadUrl?: string; releaseUrl?: string; isAsar?: boolean }> {
   return new Promise((resolve) => {
     const opts = {
       hostname: 'api.github.com',
@@ -31,12 +31,18 @@ async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string
           const latestVersion = (release.tag_name || '').replace(/^v/, '');
           if (!latestVersion) return resolve({ hasUpdate: false });
           const hasUpdate = latestVersion !== CURRENT_VERSION && isNewerVersion(latestVersion, CURRENT_VERSION);
-          const asset = (release.assets || []).find((a: any) => a.name.endsWith('.exe'));
+
+          // Check for lightweight app.asar asset first, then exe
+          const asarAsset = (release.assets || []).find((a: any) => a.name === 'app.asar');
+          const exeAsset = (release.assets || []).find((a: any) => a.name.endsWith('.exe'));
+          const targetAsset = asarAsset || exeAsset;
+
           resolve({
             hasUpdate,
             version: latestVersion,
-            downloadUrl: asset?.browser_download_url,
-            releaseUrl: release.html_url
+            downloadUrl: targetAsset?.browser_download_url,
+            releaseUrl: release.html_url,
+            isAsar: !!asarAsset
           });
         } catch (e) {
           resolve({ hasUpdate: false });
@@ -87,15 +93,91 @@ async function downloadUpdate(url: string, destPath: string, onProgress: (pct: n
 
 let mainWindow: BrowserWindow | null = null;
 
-// Paths
-const userDataPath = app.getPath('userData');
-const configFilePath = path.join(userDataPath, 'discolauncher-config.json');
+// Paths - unified under AppData\.DiscoLauncher
+const appDataRoot = app.getPath('appData');
+const discoRoot = path.join(appDataRoot, '.DiscoLauncher');
+const launcherDir = path.join(discoRoot, 'Launcher');
+const appBinDir = path.join(launcherDir, 'app');
+const defaultMinecraftDir = path.join(launcherDir, 'Minecraft', 'game');
+const logsDir = path.join(launcherDir, 'logs');
+const configFilePath = path.join(discoRoot, 'config.json');
 
-// Helper to read/write JSON config
+// Ensure base directories exist
+for (const dir of [discoRoot, launcherDir, appBinDir, defaultMinecraftDir, logsDir]) {
+  if (!fs.existsSync(dir)) {
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  }
+}
+
+// Redirect Electron's internal storage (cache, cookies, IndexedDB) to .DiscoLauncher/data
+try {
+  app.setPath('userData', path.join(discoRoot, 'data'));
+} catch (e) {
+  console.warn('Could not set custom userData path:', e);
+}
+
+// File Logging: logs/launcher.log and logs/latest.log
+const launcherLogPath = path.join(logsDir, 'launcher.log');
+const latestLogPath = path.join(logsDir, 'latest.log');
+
+try {
+  fs.writeFileSync(latestLogPath, `--- DiscoLauncher Log Started at ${new Date().toISOString()} ---\n`, 'utf-8');
+} catch {}
+
+function writeLogToFile(line: string) {
+  try {
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const entry = `[${timestamp}] ${line}\n`;
+    fs.appendFileSync(launcherLogPath, entry, 'utf-8');
+    fs.appendFileSync(latestLogPath, entry, 'utf-8');
+  } catch {}
+}
+
+// Hook console.log/warn/error to file logging
+const origConsoleLog = console.log;
+const origConsoleWarn = console.warn;
+const origConsoleError = console.error;
+
+console.log = (...args: any[]) => {
+  origConsoleLog(...args);
+  writeLogToFile(`[INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`);
+};
+console.warn = (...args: any[]) => {
+  origConsoleWarn(...args);
+  writeLogToFile(`[WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`);
+};
+console.error = (...args: any[]) => {
+  origConsoleError(...args);
+  writeLogToFile(`[ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`);
+};
+
+// Global process error logging
+process.on('uncaughtException', (err) => {
+  writeLogToFile(`[CRITICAL UNCAUGHT EXCEPTION] ${err?.stack || err}`);
+});
+process.on('unhandledRejection', (reason) => {
+  writeLogToFile(`[UNHANDLED REJECTION] ${reason}`);
+});
+
+// Helper to read/write JSON config with automatic migration from legacy paths
 function readConfig(): Record<string, any> {
   try {
     if (fs.existsSync(configFilePath)) {
       return JSON.parse(fs.readFileSync(configFilePath, 'utf-8'));
+    }
+    // Migration: .DiscoLauncher/discolauncher-config.json
+    const legacyPath1 = path.join(discoRoot, 'discolauncher-config.json');
+    if (fs.existsSync(legacyPath1)) {
+      const data = JSON.parse(fs.readFileSync(legacyPath1, 'utf-8'));
+      fs.writeFileSync(configFilePath, JSON.stringify(data, null, 2), 'utf-8');
+      return data;
+    }
+    // Migration: AppData/Roaming/discolauncher/discolauncher-config.json
+    const legacyPath2 = path.join(appDataRoot, 'discolauncher', 'discolauncher-config.json');
+    if (fs.existsSync(legacyPath2)) {
+      const data = JSON.parse(fs.readFileSync(legacyPath2, 'utf-8'));
+      fs.writeFileSync(configFilePath, JSON.stringify(data, null, 2), 'utf-8');
+      return data;
     }
   } catch (e) {
     console.error('Failed to read config:', e);
@@ -158,11 +240,14 @@ async function runSilentAutoUpdate() {
       version: update.version
     });
 
-    // For portable builds, PORTABLE_EXECUTABLE_FILE points to the actual .exe on the Desktop
-    const targetExePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-    const tmpExe = path.join(os.tmpdir(), `DiscoLauncher_v${update.version}.exe`);
+    // Check if updating app.asar or full exe
+    const isAsar = !!update.isAsar;
+    const targetFile = isAsar
+      ? path.join(process.resourcesPath, 'app.asar')
+      : (process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
+    const tmpFile = path.join(os.tmpdir(), isAsar ? `update_${update.version}.asar` : `DiscoLauncher_v${update.version}.exe`);
 
-    await downloadUpdate(update.downloadUrl, tmpExe, (pct) => {
+    await downloadUpdate(update.downloadUrl, tmpFile, (pct) => {
       mainWindow?.webContents.send('update:status', {
         stage: 'downloading',
         percent: pct,
@@ -176,19 +261,20 @@ async function runSilentAutoUpdate() {
       version: update.version
     });
 
-    // Write a .bat that waits for process to exit and release file lock, then replaces exe and restarts
+    // Write a .bat that waits for process to exit and release file lock, then replaces file and restarts
+    const exeToRestart = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
     const batPath = path.join(os.tmpdir(), 'discolauncher_update.bat');
     const batContent = [
       '@echo off',
       'ping 127.0.0.1 -n 3 > nul',
       ':retry',
-      `copy /Y "${tmpExe}" "${targetExePath}" > nul 2>&1`,
+      `copy /Y "${tmpFile}" "${targetFile}" > nul 2>&1`,
       'if errorlevel 1 (',
       '  ping 127.0.0.1 -n 2 > nul',
       '  goto retry',
       ')',
-      `del "${tmpExe}" > nul 2>&1`,
-      `start "" "${targetExePath}"`,
+      `del "${tmpFile}" > nul 2>&1`,
+      `start "" "${exeToRestart}"`,
       'del "%~f0"'
     ].join('\r\n');
     fs.writeFileSync(batPath, batContent, 'ascii');
@@ -206,6 +292,14 @@ async function runSilentAutoUpdate() {
 }
 
 app.whenReady().then(() => {
+  writeLogToFile(`[LIFECYCLE] App ready. DiscoLauncher v${CURRENT_VERSION}`);
+  writeLogToFile(`[PATHS] AppData: ${appDataRoot}`);
+  writeLogToFile(`[PATHS] DiscoRoot: ${discoRoot}`);
+  writeLogToFile(`[PATHS] Launcher: ${launcherDir}`);
+  writeLogToFile(`[PATHS] Minecraft: ${defaultMinecraftDir}`);
+  writeLogToFile(`[PATHS] Logs: ${logsDir}`);
+  writeLogToFile(`[PATHS] Config: ${configFilePath}`);
+
   createWindow();
 
   app.on('activate', () => {
@@ -262,6 +356,7 @@ let logWindow: BrowserWindow | null = null;
 const cachedLogs: string[] = [];
 
 function sendLog(line: string) {
+  writeLogToFile(line);
   cachedLogs.push(line);
   if (cachedLogs.length > 5000) cachedLogs.shift();
   mainWindow?.webContents.send('game:log', line);
@@ -681,17 +776,27 @@ ipcMain.handle('launcher:getSystemInfo', () => {
 
 function getEffectiveGameDir(customDir?: string): string {
   if (customDir && customDir.trim().length > 0) return customDir;
-  if (process.platform === 'win32') {
-    return path.join(app.getPath('appData'), '.DiscoLauncher', 'Launcher', 'Minecraft', 'game');
-  } else if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', '.DiscoLauncher', 'Launcher', 'Minecraft', 'game');
-  } else {
-    return path.join(os.homedir(), '.DiscoLauncher', 'Launcher', 'Minecraft', 'game');
-  }
+  return defaultMinecraftDir;
 }
 
 ipcMain.handle('launcher:getDefaultGameDir', () => {
   return getEffectiveGameDir();
+});
+
+ipcMain.handle('launcher:openLogsFolder', () => {
+  if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+  shell.openPath(logsDir);
+});
+
+ipcMain.handle('launcher:getPaths', () => {
+  return {
+    discoRoot,
+    launcherDir,
+    appBinDir,
+    minecraftDir: defaultMinecraftDir,
+    logsDir,
+    configFilePath
+  };
 });
 
 // Mods Management IPC
@@ -1192,7 +1297,7 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
     openOrFocusLogWindow();
   }
 
-  const gameDir = settings.gameDir || path.join(app.getPath('appData'), '.DiscoLauncher', 'Launcher', 'Minecraft', 'game');
+  const gameDir = settings.gameDir || defaultMinecraftDir;
   if (!fs.existsSync(gameDir)) fs.mkdirSync(gameDir, { recursive: true });
 
   const ramMb = settings.allocatedRamMb || 4096;

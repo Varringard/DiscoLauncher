@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Cpu, HardDrive, Monitor, FolderOpen, RefreshCw, CheckCircle2, AlertCircle, Terminal, Layers } from 'lucide-react';
+import { Settings, Cpu, HardDrive, Monitor, FolderOpen, RefreshCw, CheckCircle2, AlertCircle, Terminal, Layers, FileText } from 'lucide-react';
 import { LauncherSettings } from '../types';
 
 interface SettingsTabProps {
@@ -137,9 +137,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, onUpdateSett
             <button
               onClick={handleOpenGameDir}
               className="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs font-semibold text-indigo-300"
-              title="Открыть папку"
+              title="Открыть папку игры Minecraft"
             >
               Открыть
+            </button>
+            <button
+              onClick={() => (window as any).electronAPI?.openLogsFolder?.()}
+              className="px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-semibold text-amber-300 flex items-center gap-1.5"
+              title="Открыть папку с логами лаунчера и игры"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Логи
             </button>
           </div>
         </div>

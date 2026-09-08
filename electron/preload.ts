@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSystemInfo: () => ipcRenderer.invoke('launcher:getSystemInfo'),
   getDefaultGameDir: () => ipcRenderer.invoke('launcher:getDefaultGameDir'),
   openFolder: (pathStr: string) => ipcRenderer.invoke('launcher:openFolder', pathStr),
+  openLogsFolder: () => ipcRenderer.invoke('launcher:openLogsFolder'),
+  getLauncherPaths: () => ipcRenderer.invoke('launcher:getPaths'),
   openExternal: (url: string) => ipcRenderer.invoke('launcher:openExternal', url),
   openLogWindow: () => ipcRenderer.invoke('window:openLogWindow'),
   loginMicrosoft: () => ipcRenderer.invoke('auth:loginMicrosoft'),
