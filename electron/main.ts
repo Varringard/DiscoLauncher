@@ -95,7 +95,30 @@ const configFilePath = path.join(userDataPath, 'discolauncher-config.json');
 function readConfig(): Record<string, any> {
   try {
     if (fs.existsSync(configFilePath)) {
-      return JSON.parse(fs.readFileSync(configFilePath, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(configFilePath, 'utf-8'));
+      if (data && (data.accounts?.length > 0 || data.settings)) {
+        return data;
+      }
+    }
+
+    // Auto-migration from legacy exodus config files
+    const appData = app.getPath('appData');
+    const legacyPaths = [
+      path.join(appData, 'exodus-launcher', 'exodus-config.json'),
+      path.join(appData, 'ExodusWorld Launcher', 'exodus-config.json'),
+      path.join(userDataPath, 'exodus-config.json')
+    ];
+
+    for (const leg of legacyPaths) {
+      if (fs.existsSync(leg)) {
+        try {
+          const legData = JSON.parse(fs.readFileSync(leg, 'utf-8'));
+          if (legData && (legData.accounts || legData.settings)) {
+            writeConfig(legData);
+            return legData;
+          }
+        } catch (e) {}
+      }
     }
   } catch (e) {
     console.error('Failed to read config:', e);
