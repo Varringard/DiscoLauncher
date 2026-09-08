@@ -261,24 +261,23 @@ async function runSilentAutoUpdate() {
       version: update.version
     });
 
-    // Write a .bat that waits for process to exit and release file lock, then replaces file and restarts
     const exeToRestart = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
-    const batPath = path.join(os.tmpdir(), 'discolauncher_update.bat');
-    const batContent = [
-      '@echo off',
-      'ping 127.0.0.1 -n 3 > nul',
-      ':retry',
-      `copy /Y "${tmpFile}" "${targetFile}" > nul 2>&1`,
-      'if errorlevel 1 (',
-      '  ping 127.0.0.1 -n 2 > nul',
-      '  goto retry',
-      ')',
-      `del "${tmpFile}" > nul 2>&1`,
-      `start "" "${exeToRestart}"`,
-      'del "%~f0"'
-    ].join('\r\n');
-    fs.writeFileSync(batPath, batContent, 'ascii');
-    spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' }).unref();
+    // Completely hidden background update process (no visible CMD window, no pings)
+    const psScript = [
+      'Start-Sleep -Milliseconds 1500;',
+      'for ($i = 0; $i -lt 30; $i++) {',
+      `  try { Copy-Item -LiteralPath '${tmpFile.replace(/'/g, "''")}' -Destination '${targetFile.replace(/'/g, "''")}' -Force -ErrorAction Stop; break; }`,
+      '  catch { Start-Sleep -Milliseconds 300; }',
+      '};',
+      `Remove-Item -LiteralPath '${tmpFile.replace(/'/g, "''")}' -Force -ErrorAction SilentlyContinue;`,
+      `Start-Process -FilePath '${exeToRestart.replace(/'/g, "''")}';`
+    ].join(' ');
+
+    spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-NoProfile', '-Command', psScript], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    }).unref();
     app.quit();
   } catch (err: any) {
     console.warn('Auto-update notice:', err?.message);
