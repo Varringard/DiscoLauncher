@@ -11,7 +11,7 @@ const { Client: MCLCClient, Authenticator: MCLCAuthenticator } = require('minecr
 // =========================================================================
 // AUTO-UPDATER (GitHub Releases — portable exe self-replace)
 // =========================================================================
-const GITHUB_OWNER = 'varrimain';
+const GITHUB_OWNER = 'Varringard';
 const GITHUB_REPO = 'DiscoLauncher';
 const CURRENT_VERSION = app.getVersion();
 
