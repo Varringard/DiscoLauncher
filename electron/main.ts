@@ -105,11 +105,18 @@ for (const dir of [discoRoot, launcherDir, defaultMinecraftDir, logsDir]) {
   }
 }
 
-// Clean up legacy empty 'app' directory if present
+// Clean up legacy empty 'app' directory or leftover 'temp' directory if present
 try {
   const legacyAppDir = path.join(launcherDir, 'app');
   if (fs.existsSync(legacyAppDir) && fs.readdirSync(legacyAppDir).length === 0) {
     fs.rmdirSync(legacyAppDir);
+  }
+} catch {}
+
+try {
+  const launcherTempDir = path.join(launcherDir, 'temp');
+  if (fs.existsSync(launcherTempDir)) {
+    fs.rmSync(launcherTempDir, { recursive: true, force: true });
   }
 } catch {}
 
@@ -1234,8 +1241,8 @@ async function prepareNeoForge(
     onProgress?.(15, `Загрузка установщика NeoForge ${neoVer}...`);
     const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoVer}/neoforge-${neoVer}-installer.jar`;
     
-    // Download to temporary folder instead of game directory
-    const tempDir = path.join(os.tmpdir(), 'DiscoLauncher');
+    // Download to 'temp' folder inside launcher directory
+    const tempDir = path.join(launcherDir, 'temp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const installerPath = path.join(tempDir, `neoforge-${neoVer}-installer.jar`);
 
@@ -1251,10 +1258,10 @@ async function prepareNeoForge(
       onProgress?.(25, `Установка загрузчика NeoForge ${neoVer}...`);
       spawnSync(javaExe, ['-jar', installerPath, '--installClient', gameDir], { stdio: 'pipe' });
     } finally {
-      // Auto-delete temporary installer jar
+      // Auto-delete the entire temp folder inside launcher directory
       try {
-        if (fs.existsSync(installerPath)) {
-          fs.unlinkSync(installerPath);
+        if (fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
         }
       } catch (e) {}
     }
