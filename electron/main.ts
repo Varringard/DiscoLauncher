@@ -263,73 +263,57 @@ async function runSilentAutoUpdate() {
     });
 
     const oldPid = process.pid;
-    const targetFileEscaped = targetFile.replace(/\\/g, '\\\\');
-    const tmpFileEscaped = tmpFile.replace(/\\/g, '\\\\');
-    const logFileEscaped = path.join(os.tmpdir(), 'DiscoLauncher_updater.log').replace(/\\/g, '\\\\');
+    const batPath = path.join(os.tmpdir(), 'discolauncher_updater.bat');
+    const logPath = path.join(os.tmpdir(), 'DiscoLauncher_updater.log');
 
-    // Build PowerShell script via array join (avoids TS parsing $vars inside template literals)
-    const ps: string[] = [
-      'param()',
-      `$logFile = "${logFileEscaped}"`,
-      'function Log($msg) {',
-      '  $ts = Get-Date -Format "HH:mm:ss"',
-      '  Add-Content -Path $logFile -Value "[$ts] $msg" -ErrorAction SilentlyContinue',
-      '}',
-      '',
-      `Log "Updater started. Old PID=${oldPid}"`,
-      '',
-      `$oldPid = ${oldPid}`,
-      'if ($oldPid -gt 0) {',
-      '  try {',
-      '    $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue',
-      '    if ($proc) {',
-      '      Log "Waiting for PID=$oldPid..."',
-      '      $proc.WaitForExit(20000)',
-      '      Log "PID=$oldPid exited (or timeout)"',
-      '    }',
-      '  } catch {}',
-      '}',
-      '',
-      '# Wait for portable wrapper (different PID) to release file lock',
-      'Start-Sleep -Milliseconds 2000',
-      '$launcherProcs = Get-Process -Name "DiscoLauncher" -ErrorAction SilentlyContinue',
-      'if ($launcherProcs) {',
-      '  Log "Waiting for remaining DiscoLauncher processes..."',
-      '  foreach ($p in $launcherProcs) { try { $p.WaitForExit(10000) } catch {} }',
-      '  Start-Sleep -Milliseconds 1000',
-      '}',
-      '',
-      `$target = "${targetFileEscaped}"`,
-      `$source = "${tmpFileEscaped}"`,
-      '',
-      'Log "Copying source to target..."',
-      '$copied = $false',
-      'for ($i = 0; $i -lt 60; $i++) {',
-      '  try {',
-      '    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop',
-      '    $copied = $true',
-      '    Log "Copy succeeded on attempt $i"',
-      '    break',
-      '  } catch {',
-      '    Log "Copy attempt $i failed: $_"',
-      '    Start-Sleep -Milliseconds 500',
-      '  }',
-      '}',
-      '',
-      'if (-not $copied) { Log "ERROR: copy failed"; exit 1 }',
-      '',
-      'Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue',
-      'Start-Sleep -Milliseconds 500',
-      'Log "Launching: $target"',
-      '',
-      '# Use cmd start for reliable portable exe launch (inherits env vars correctly)',
-      'Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "start", `""`", "`"$target`"") -WindowStyle Hidden',
-      'Log "Launch command sent."',
-    ];
-    const psScript = ps.join('\n');
+    const batContent = `@echo off
+chcp 65001 >nul
+set "TARGET=${targetFile}"
+set "SOURCE=${tmpFile}"
+set "LOG=${logPath}"
 
-    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-    spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-NoProfile', '-EncodedCommand', encoded], {
+echo [%TIME%] Updater started. Target: %TARGET% > "%LOG%"
+echo [%TIME%] Source: %SOURCE% >> "%LOG%"
+echo [%TIME%] Old PID: ${oldPid} >> "%LOG%"
+
+:: Wait for old process to fully exit
+timeout /t 2 /nobreak >nul
+
+:: Wait up to 30 seconds for the file lock to release
+set /a ATTEMPTS=0
+:REPLACE_LOOP
+set /a ATTEMPTS+=1
+echo [%TIME%] Attempt %ATTEMPTS% to replace exe... >> "%LOG%"
+
+del /f /q "%TARGET%" >nul 2>&1
+if not exist "%TARGET%" goto DO_MOVE
+
+timeout /t 1 /nobreak >nul
+if %ATTEMPTS% leq 30 goto REPLACE_LOOP
+
+echo [%TIME%] ERROR: Timeout waiting for target file to unlock >> "%LOG%"
+exit /b 1
+
+:DO_MOVE
+move /y "%SOURCE%" "%TARGET%" >nul 2>&1
+if exist "%TARGET%" (
+    echo [%TIME%] Successfully replaced target exe. >> "%LOG%"
+) else (
+    echo [%TIME%] ERROR: Move failed. >> "%LOG%"
+    exit /b 1
+)
+
+echo [%TIME%] Launching updated executable... >> "%LOG%"
+start "" "%TARGET%"
+echo [%TIME%] Launched successfully. >> "%LOG%"
+
+:: Self-destruct updater script
+(goto) 2>nul & del "%~f0"
+`;
+
+    fs.writeFileSync(batPath, batContent, 'utf8');
+
+    spawn('cmd.exe', ['/c', batPath], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true
