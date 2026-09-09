@@ -1163,7 +1163,7 @@ async function resolveJavaExecutable(
   return candidate;
 }
 
-// Ensure vanilla version JSON and asset index (sounds, textures) exist before launching or installing modloaders
+// Ensure vanilla version JSON, client jar, and asset index (sounds, textures) exist before launching or installing modloaders
 async function ensureVanillaVersionAndAssets(
   gameDir: string,
   mcVersion: string,
@@ -1179,8 +1179,14 @@ async function ensureVanillaVersionAndAssets(
 
   let verData: any = null;
 
-  // 1. If vanilla version json missing, fetch from Mojang
-  if (!fs.existsSync(versionJsonPath)) {
+  // 1. If vanilla version json missing or incomplete, fetch from Mojang
+  if (fs.existsSync(versionJsonPath)) {
+    try {
+      verData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
+    } catch (_) {}
+  }
+
+  if (!verData || !verData.downloads || !verData.downloads.client) {
     try {
       onProgress?.(8, `Загрузка данных версии Minecraft ${mcVersion}...`);
       const manifestRes = await fetch('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
@@ -1194,18 +1200,25 @@ async function ensureVanillaVersionAndAssets(
     } catch (err) {
       console.warn('[Assets] Failed to download vanilla version json:', err);
     }
-  } else {
-    try {
-      verData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
-    } catch (_) {}
   }
 
-  // 2. If target asset index missing, download from Mojang assetIndex URL
+  // 2. Ensure vanilla client jar exists
+  const clientJarPath = path.join(versionFolder, `${mcVersion}.jar`);
+  if (!fs.existsSync(clientJarPath)) {
+    const clientUrl = verData?.downloads?.client?.url;
+    if (clientUrl) {
+      onProgress?.(15, `Загрузка клиента Minecraft ${mcVersion}...`);
+      await downloadFile(clientUrl, clientJarPath);
+      console.log(`[Client] Successfully downloaded ${mcVersion}.jar`);
+    }
+  }
+
+  // 3. If target asset index missing, download from Mojang assetIndex URL
   if (!fs.existsSync(targetIndexPath)) {
     const assetIndexUrl = verData?.assetIndex?.url;
     if (assetIndexUrl) {
       try {
-        onProgress?.(12, `Загрузка индекса звуков и ресурсов Minecraft ${mcVersion}...`);
+        onProgress?.(20, `Загрузка индекса звуков и ресурсов Minecraft ${mcVersion}...`);
         await downloadFile(assetIndexUrl, targetIndexPath);
         console.log(`[Assets] Successfully downloaded ${mcVersion}.json asset index`);
       } catch (err) {
@@ -1214,7 +1227,7 @@ async function ensureVanillaVersionAndAssets(
     }
   }
 
-  // 3. Ensure any alias / ID (e.g. "24.json") is also mirrored
+  // 4. Ensure any alias / ID (e.g. "24.json") is also mirrored
   if (verData?.assetIndex?.id && verData.assetIndex.id !== mcVersion) {
     const idPath = path.join(indexesDir, `${verData.assetIndex.id}.json`);
     if (fs.existsSync(targetIndexPath) && !fs.existsSync(idPath)) {
@@ -1459,11 +1472,11 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
     (server.modloader === 'forge') ? 'forge' : 'vanilla'
   );
 
-  // For NeoForge / Forge, ASM and Mixin do not yet support Java 26 bytecode (major version 70).
-  // Therefore, for NeoForge/Forge we use Java 21.
+  // For NeoForge / Forge / Fabric / Quilt, ASM and Mixin do not yet support Java 26 bytecode (major version 70).
+  // Therefore, for modded loaders we use Java 21.
   // For Vanilla / Snapshots (like 26.2 or clean 1.21.5), the user's system Java (including Java 26) is used directly!
   let javaExe = settings.javaPath || 'java';
-  if (targetLoaderType === 'neoforge' || targetLoaderType === 'forge') {
+  if (targetLoaderType === 'neoforge' || targetLoaderType === 'forge' || targetLoaderType === 'fabric' || targetLoaderType === 'quilt') {
     javaExe = await resolveJavaExecutable(settings.javaPath, gameDir, (pct, detail) => {
       mainWindow?.webContents.send('launch:progress', { stage: 'downloading', percent: pct, detail });
     });
@@ -1561,13 +1574,13 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
       mainWindow?.webContents.send('launch:progress', { stage: 'downloading', percent: pct, detail });
     });
     customVersionName = fab.custom;
-    versionJsonOverride = fab.versionJson;
+    versionJsonOverride = path.join(gameDir, 'versions', targetMcVersion, `${targetMcVersion}.json`);
   } else if (targetLoaderType === 'quilt') {
     const q = await prepareQuilt(gameDir, targetMcVersion, selectedVersion?.loaderVersion, (pct, detail) => {
       mainWindow?.webContents.send('launch:progress', { stage: 'downloading', percent: pct, detail });
     });
     customVersionName = q.custom;
-    versionJsonOverride = q.versionJson;
+    versionJsonOverride = path.join(gameDir, 'versions', targetMcVersion, `${targetMcVersion}.json`);
   }
 
   // Hook MCLC events to launcher UI
