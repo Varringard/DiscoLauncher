@@ -1,6 +1,6 @@
 {
   "name": "discolauncher",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "DiscoLauncher — open source Minecraft launcher with multi-server management, 3D skin preview, and mod auto-sync",
   "main": "dist-electron/main.js",
   "author": "DiscoLauncher Contributors",

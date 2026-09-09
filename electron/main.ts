@@ -249,35 +249,70 @@ async function runSilentAutoUpdate() {
     });
 
     const oldPid = process.pid;
-    // Bulletproof hidden updater using PowerShell Base64 EncodedCommand
-    const psScript = `
-param()
-$oldPid = ${oldPid}
-if ($oldPid -gt 0) {
-  try {
-    $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
-    if ($proc) { $proc.WaitForExit(15000) }
-  } catch {}
-}
+    const targetFileEscaped = targetFile.replace(/\\/g, '\\\\');
+    const tmpFileEscaped = tmpFile.replace(/\\/g, '\\\\');
+    const logFileEscaped = path.join(os.tmpdir(), 'DiscoLauncher_updater.log').replace(/\\/g, '\\\\');
 
-Start-Sleep -Milliseconds 1000
-
-$target = "${targetFile.replace(/\\/g, '\\\\')}"
-$source = "${tmpFile.replace(/\\/g, '\\\\')}"
-
-for ($i = 0; $i -lt 50; $i++) {
-  try {
-    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
-    break
-  } catch {
-    Start-Sleep -Milliseconds 300
-  }
-}
-
-Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
-
-Start-Process -FilePath $target
-`;
+    // Build PowerShell script via array join (avoids TS parsing $vars inside template literals)
+    const ps: string[] = [
+      'param()',
+      `$logFile = "${logFileEscaped}"`,
+      'function Log($msg) {',
+      '  $ts = Get-Date -Format "HH:mm:ss"',
+      '  Add-Content -Path $logFile -Value "[$ts] $msg" -ErrorAction SilentlyContinue',
+      '}',
+      '',
+      `Log "Updater started. Old PID=${oldPid}"`,
+      '',
+      `$oldPid = ${oldPid}`,
+      'if ($oldPid -gt 0) {',
+      '  try {',
+      '    $proc = Get-Process -Id $oldPid -ErrorAction SilentlyContinue',
+      '    if ($proc) {',
+      '      Log "Waiting for PID=$oldPid..."',
+      '      $proc.WaitForExit(20000)',
+      '      Log "PID=$oldPid exited (or timeout)"',
+      '    }',
+      '  } catch {}',
+      '}',
+      '',
+      '# Wait for portable wrapper (different PID) to release file lock',
+      'Start-Sleep -Milliseconds 2000',
+      '$launcherProcs = Get-Process -Name "DiscoLauncher" -ErrorAction SilentlyContinue',
+      'if ($launcherProcs) {',
+      '  Log "Waiting for remaining DiscoLauncher processes..."',
+      '  foreach ($p in $launcherProcs) { try { $p.WaitForExit(10000) } catch {} }',
+      '  Start-Sleep -Milliseconds 1000',
+      '}',
+      '',
+      `$target = "${targetFileEscaped}"`,
+      `$source = "${tmpFileEscaped}"`,
+      '',
+      'Log "Copying source to target..."',
+      '$copied = $false',
+      'for ($i = 0; $i -lt 60; $i++) {',
+      '  try {',
+      '    Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop',
+      '    $copied = $true',
+      '    Log "Copy succeeded on attempt $i"',
+      '    break',
+      '  } catch {',
+      '    Log "Copy attempt $i failed: $_"',
+      '    Start-Sleep -Milliseconds 500',
+      '  }',
+      '}',
+      '',
+      'if (-not $copied) { Log "ERROR: copy failed"; exit 1 }',
+      '',
+      'Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue',
+      'Start-Sleep -Milliseconds 500',
+      'Log "Launching: $target"',
+      '',
+      '# Use cmd start for reliable portable exe launch (inherits env vars correctly)',
+      'Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "start", `""`", "`"$target`"") -WindowStyle Hidden',
+      'Log "Launch command sent."',
+    ];
+    const psScript = ps.join('\n');
 
     const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
     spawn('powershell.exe', ['-WindowStyle', 'Hidden', '-NoProfile', '-EncodedCommand', encoded], {
