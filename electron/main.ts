@@ -1090,13 +1090,45 @@ ipcMain.handle('launcher:syncServerFiles', async (_, { serverId, manifestUrl, ga
       }
     }
 
+    // Cleanup obsolete/unmanaged mods in gameDir/mods
+    const localModsDir = path.join(gameDir, 'mods');
+    let removedModsCount = 0;
+    if (fs.existsSync(localModsDir)) {
+      const manifestModFiles = new Set(
+        files
+          .map(f => f.path.replace(/\\/g, '/'))
+          .filter(p => p.toLowerCase().startsWith('mods/'))
+          .map(p => path.basename(p).toLowerCase())
+      );
+
+      try {
+        const localMods = fs.readdirSync(localModsDir);
+        for (const file of localMods) {
+          if (file.endsWith('.jar') || file.endsWith('.jar.disabled')) {
+            const rawName = file.replace(/\.disabled$/, '').toLowerCase();
+            if (!manifestModFiles.has(rawName) && !manifestModFiles.has(file.toLowerCase())) {
+              try {
+                fs.unlinkSync(path.join(localModsDir, file));
+                removedModsCount++;
+                console.log(`[Sync] Удален неактуальный мод: ${file}`);
+              } catch (e) {
+                console.warn(`[Sync] Не удалось удалить устаревший мод ${file}:`, e);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Sync] Ошибка сканирования папки mods:', e);
+      }
+    }
+
     mainWindow?.webContents.send('launch:progress', {
       stage: 'idle',
       percent: 100,
       detail: 'Синхронизация завершена успешно!'
     });
 
-    return { success: true, updatedCount: toDownload.length };
+    return { success: true, updatedCount: toDownload.length, removedCount: removedModsCount };
   } catch (err: any) {
     mainWindow?.webContents.send('launch:progress', {
       stage: 'error',

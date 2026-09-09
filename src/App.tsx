@@ -277,7 +277,10 @@ export const App: React.FC = () => {
         console.warn('Sync notice:', syncResult.error);
         setLogs((prev) => [...prev, `[Launcher] Синхронизация: ${syncResult.error}`]);
       } else {
-        setLogs((prev) => [...prev, `[Launcher] Проверено файлов: обновлено ${syncResult.updatedCount}`]);
+        const msg = (syncResult.removedCount && syncResult.removedCount > 0)
+          ? `[Launcher] Проверено файлов: обновлено ${syncResult.updatedCount}, удалено устаревших модов: ${syncResult.removedCount}`
+          : `[Launcher] Проверено файлов: обновлено ${syncResult.updatedCount}`;
+        setLogs((prev) => [...prev, msg]);
       }
 
       // 2. Launch Minecraft
