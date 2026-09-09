@@ -1111,6 +1111,68 @@ async function resolveJavaExecutable(
   return candidate;
 }
 
+// Ensure vanilla version JSON and asset index (sounds, textures) exist before launching or installing modloaders
+async function ensureVanillaVersionAndAssets(
+  gameDir: string,
+  mcVersion: string,
+  onProgress?: (pct: number, detail: string) => void
+): Promise<void> {
+  const versionFolder = path.join(gameDir, 'versions', mcVersion);
+  const versionJsonPath = path.join(versionFolder, `${mcVersion}.json`);
+  const indexesDir = path.join(gameDir, 'assets', 'indexes');
+  fs.mkdirSync(versionFolder, { recursive: true });
+  fs.mkdirSync(indexesDir, { recursive: true });
+
+  const targetIndexPath = path.join(indexesDir, `${mcVersion}.json`);
+
+  let verData: any = null;
+
+  // 1. If vanilla version json missing, fetch from Mojang
+  if (!fs.existsSync(versionJsonPath)) {
+    try {
+      onProgress?.(8, `Загрузка данных версии Minecraft ${mcVersion}...`);
+      const manifestRes = await fetch('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
+      const manifest: any = await manifestRes.json();
+      const verEntry = manifest?.versions?.find((v: any) => v.id === mcVersion);
+      if (verEntry?.url) {
+        const verRes = await fetch(verEntry.url);
+        verData = await verRes.json();
+        fs.writeFileSync(versionJsonPath, JSON.stringify(verData, null, 2), 'utf8');
+      }
+    } catch (err) {
+      console.warn('[Assets] Failed to download vanilla version json:', err);
+    }
+  } else {
+    try {
+      verData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8'));
+    } catch (_) {}
+  }
+
+  // 2. If target asset index missing, download from Mojang assetIndex URL
+  if (!fs.existsSync(targetIndexPath)) {
+    const assetIndexUrl = verData?.assetIndex?.url;
+    if (assetIndexUrl) {
+      try {
+        onProgress?.(12, `Загрузка индекса звуков и ресурсов Minecraft ${mcVersion}...`);
+        await downloadFile(assetIndexUrl, targetIndexPath);
+        console.log(`[Assets] Successfully downloaded ${mcVersion}.json asset index`);
+      } catch (err) {
+        console.warn('[Assets] Failed to download asset index:', err);
+      }
+    }
+  }
+
+  // 3. Ensure any alias / ID (e.g. "24.json") is also mirrored
+  if (verData?.assetIndex?.id && verData.assetIndex.id !== mcVersion) {
+    const idPath = path.join(indexesDir, `${verData.assetIndex.id}.json`);
+    if (fs.existsSync(targetIndexPath) && !fs.existsSync(idPath)) {
+      try { fs.copyFileSync(targetIndexPath, idPath); } catch (_) {}
+    } else if (fs.existsSync(idPath) && !fs.existsSync(targetIndexPath)) {
+      try { fs.copyFileSync(idPath, targetIndexPath); } catch (_) {}
+    }
+  }
+}
+
 // NeoForge installer and runner
 async function prepareNeoForge(
   gameDir: string,
@@ -1331,6 +1393,11 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
     });
   }
 
+  // Pre-fetch vanilla version JSON & official sound/asset index if missing (for clean installs)
+  await ensureVanillaVersionAndAssets(gameDir, targetMcVersion, (pct, detail) => {
+    mainWindow?.webContents.send('launch:progress', { stage: 'downloading', percent: pct, detail });
+  });
+
   const mclc = new MCLCClient();
 
   // Auth preparation
@@ -1436,6 +1503,23 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
     sendLog(data.toString().trim());
   });
 
+  function syncAssetIndexes() {
+    try {
+      const indexesDir = path.join(gameDir, 'assets', 'indexes');
+      if (fs.existsSync(indexesDir)) {
+        const targetIndex = path.join(indexesDir, `${targetMcVersion}.json`);
+        const customIndex = customVersionName ? path.join(indexesDir, `${customVersionName}.json`) : null;
+        if (customIndex && fs.existsSync(customIndex) && !fs.existsSync(targetIndex)) {
+          fs.copyFileSync(customIndex, targetIndex);
+        } else if (customIndex && fs.existsSync(targetIndex) && !fs.existsSync(customIndex)) {
+          fs.copyFileSync(targetIndex, customIndex);
+        }
+      }
+    } catch (e) {
+      console.warn('Asset index sync warning:', e);
+    }
+  }
+
   mclc.on('progress', (e: any) => {
     const pct = Math.round(((e.task || 0) / (e.total || 1)) * 100);
     mainWindow?.webContents.send('launch:progress', {
@@ -1443,6 +1527,9 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
       percent: pct,
       detail: `Загрузка Minecraft: ${e.type || 'компонентов'} (${e.task || 0}/${e.total || 0})`
     });
+    if (e.type === 'assets') {
+      syncAssetIndexes();
+    }
   });
 
   mclc.on('download-status', (e: any) => {
@@ -1465,20 +1552,7 @@ ipcMain.handle('launcher:launchGame', async (_, launchParams) => {
   });
 
   // Ensure asset indexes are synchronized so Minecraft sound engine always finds sound objects
-  try {
-    const indexesDir = path.join(gameDir, 'assets', 'indexes');
-    if (fs.existsSync(indexesDir)) {
-      const targetIndex = path.join(indexesDir, `${targetMcVersion}.json`);
-      const customIndex = customVersionName ? path.join(indexesDir, `${customVersionName}.json`) : null;
-      if (customIndex && fs.existsSync(customIndex) && !fs.existsSync(targetIndex)) {
-        fs.copyFileSync(customIndex, targetIndex);
-      } else if (customIndex && fs.existsSync(targetIndex) && !fs.existsSync(customIndex)) {
-        fs.copyFileSync(targetIndex, customIndex);
-      }
-    }
-  } catch (e) {
-    console.warn('Asset index sync warning:', e);
-  }
+  syncAssetIndexes();
 
   const mclcOptions: any = {
     clientPackage: null,
