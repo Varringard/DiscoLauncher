@@ -94,17 +94,24 @@ let mainWindow: BrowserWindow | null = null;
 const appDataRoot = app.getPath('appData');
 const discoRoot = path.join(appDataRoot, '.DiscoLauncher');
 const launcherDir = path.join(discoRoot, 'Launcher');
-const appBinDir = path.join(launcherDir, 'app');
 const defaultMinecraftDir = path.join(launcherDir, 'Minecraft', 'game');
 const logsDir = path.join(launcherDir, 'logs');
 const configFilePath = path.join(discoRoot, 'config.json');
 
 // Ensure base directories exist
-for (const dir of [discoRoot, launcherDir, appBinDir, defaultMinecraftDir, logsDir]) {
+for (const dir of [discoRoot, launcherDir, defaultMinecraftDir, logsDir]) {
   if (!fs.existsSync(dir)) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   }
 }
+
+// Clean up legacy empty 'app' directory if present
+try {
+  const legacyAppDir = path.join(launcherDir, 'app');
+  if (fs.existsSync(legacyAppDir) && fs.readdirSync(legacyAppDir).length === 0) {
+    fs.rmdirSync(legacyAppDir);
+  }
+} catch {}
 
 // Redirect Electron's internal storage (cache, cookies, IndexedDB) to .DiscoLauncher/data
 try {
@@ -835,7 +842,6 @@ ipcMain.handle('launcher:getPaths', () => {
   return {
     discoRoot,
     launcherDir,
-    appBinDir,
     minecraftDir: defaultMinecraftDir,
     logsDir,
     configFilePath
@@ -1227,18 +1233,42 @@ async function prepareNeoForge(
   if (!fs.existsSync(versionJsonPath)) {
     onProgress?.(15, `Загрузка установщика NeoForge ${neoVer}...`);
     const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoVer}/neoforge-${neoVer}-installer.jar`;
-    const installerPath = path.join(gameDir, `neoforge-${neoVer}-installer.jar`);
-    await downloadFile(installerUrl, installerPath);
+    
+    // Download to temporary folder instead of game directory
+    const tempDir = path.join(os.tmpdir(), 'DiscoLauncher');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const installerPath = path.join(tempDir, `neoforge-${neoVer}-installer.jar`);
 
-    // Ensure launcher_profiles.json exists for client installer
-    const profilesPath = path.join(gameDir, 'launcher_profiles.json');
-    if (!fs.existsSync(profilesPath)) {
-      fs.writeFileSync(profilesPath, JSON.stringify({ profiles: {} }, null, 2));
+    try {
+      await downloadFile(installerUrl, installerPath);
+
+      // Ensure launcher_profiles.json exists for client installer
+      const profilesPath = path.join(gameDir, 'launcher_profiles.json');
+      if (!fs.existsSync(profilesPath)) {
+        fs.writeFileSync(profilesPath, JSON.stringify({ profiles: {} }, null, 2));
+      }
+
+      onProgress?.(25, `Установка загрузчика NeoForge ${neoVer}...`);
+      spawnSync(javaExe, ['-jar', installerPath, '--installClient', gameDir], { stdio: 'pipe' });
+    } finally {
+      // Auto-delete temporary installer jar
+      try {
+        if (fs.existsSync(installerPath)) {
+          fs.unlinkSync(installerPath);
+        }
+      } catch (e) {}
     }
-
-    onProgress?.(25, `Установка загрузчика NeoForge ${neoVer}...`);
-    spawnSync(javaExe, ['-jar', installerPath, '--installClient', gameDir], { stdio: 'pipe' });
   }
+
+  // Clean up any old installer jars from gameDir if previously left behind
+  try {
+    const files = fs.readdirSync(gameDir);
+    for (const f of files) {
+      if (f.startsWith('neoforge-') && f.endsWith('-installer.jar')) {
+        try { fs.unlinkSync(path.join(gameDir, f)); } catch (e) {}
+      }
+    }
+  } catch (e) {}
 
   if (fs.existsSync(versionJsonPath)) {
     try {
