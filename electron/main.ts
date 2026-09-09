@@ -211,12 +211,16 @@ function createWindow() {
   });
 }
 
+let isUpdating = false;
+
 async function runSilentAutoUpdate() {
   if (!app.isPackaged) return; // Don't replace electron.exe during local development
+  if (isUpdating) return; // Prevent overlapping update attempts
   try {
     const update = await checkForUpdates();
     if (!update.hasUpdate || !update.downloadUrl) return;
 
+    isUpdating = true;
     writeLogToFile(`[AutoUpdate] Found update v${update.version} from ${update.downloadUrl}`);
 
     mainWindow?.webContents.send('update:status', {
